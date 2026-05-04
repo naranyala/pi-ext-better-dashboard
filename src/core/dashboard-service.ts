@@ -45,10 +45,6 @@ export class DashboardService {
      * Clears the terminal screen.
      * Called during session_start to remove any startup logs that might have leaked.
      */
-    /**
-     * Clears the terminal screen.
-     * Called during session_start to remove any startup logs that might have leaked.
-     */
     public clearScreen(ctx?: ExtensionContext) {
         // Use console.clear for a more aggressive wipe of the terminal scrollback
         console.clear();
@@ -75,6 +71,16 @@ export class DashboardService {
         const platform = `${os.platform()} ${os.arch()}`;
         const nodeVer = process.version;
         const cwd = process.cwd();
+        const user = os.userInfo().username;
+        const uptime = this.formatUptime(os.uptime());
+        
+        // CPU Load (POSIX only)
+        const load = (typeof os.loadavg === 'function') ? os.loadavg()[0].toFixed(2) : 'N/A';
+        
+        // Memory Usage
+        const totalMem = (os.totalmem() / (1024 ** 3)).toFixed(2);
+        const freeMem = (os.freemem() / (1024 ** 3)).toFixed(2);
+        const memUsage = ((1 - os.freemem() / os.totalmem()) * 100).toFixed(1);
 
         // 4. Gather Intelligence Info
         const thinkingLevel = api.getThinkingLevel();
@@ -93,6 +99,8 @@ export class DashboardService {
 
 \x1b[1m\x1b[33m⚙️ SYSTEM\x1b[0m
   \x1b[32m●\x1b[0m OS: ${platform} | Node: ${nodeVer}
+  \x1b[32m●\x1b[0m User: ${user} | Uptime: ${uptime}
+  \x1b[32m●\x1b[0m CPU Load: ${load} | Mem: ${freeMem}/${totalMem} GB (${memUsage}%)
   \x1b[32m●\x1b[0m Path: \x1b[2m${cwd}\x1b[0m
 
 \x1b[1m\x1b[33m🛠️ CAPABILITIES\x1b[0m
@@ -101,6 +109,23 @@ export class DashboardService {
   \x1b[32m●\x1b[0m Extensions: ${extensions.size}
 `;
         console.log(welcome);
+    }
+
+    /**
+     * Formats uptime in a human-readable way.
+     */
+    private formatUptime(seconds: number): string {
+        const d = Math.floor(seconds / (3600 * 24));
+        const h = Math.floor((seconds % (3600 * 24)) / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+
+        let result = "";
+        if (d > 0) result += `${d}d `;
+        if (h > 0) result += `${h}h `;
+        if (m > 0) result += `${m}m `;
+        result += `${s}s`;
+        return result.trim();
     }
 
     /**
@@ -122,12 +147,9 @@ export class DashboardService {
                 const version = ext.version ? ` \x1b[2m(v${ext.version})\x1b[0m` : '';
                 const size = ext.sizeMB ? ` \x1b[2m(${ext.sizeMB.toFixed(2)} MB)\x1b[0m` : '';
                 const caps = ` \x1b[2m(${ext.toolsCount} tools, ${ext.commandsCount} cmds)\x1b[0m`;
+                const author = ext.author ? ` \x1b[2mby ${ext.author}\x1b[0m` : '';
 
-                console.log(`  \x1b[32m●\x1b[0m ${sourceTag} \x1b[1m${ext.name}\x1b[0m${version}${size}${caps}`);
-                
-                if (ext.description) {
-                    console.log(`    \x1b[2m${ext.description}\x1b[0m`);
-                }
+                console.log(`  \x1b[32m●\x1b[0m ${sourceTag} \x1b[1m${ext.name}\x1b[0m${version}${size}${caps}${author}`);
             }
             console.log(""); // Extra newline
         }
@@ -194,104 +216,6 @@ export class DashboardService {
             // Handle errors (e.g. permission denied)
         }
         return totalSize;
-    }
-
-    private getExtensionInfo(path: string) {
-        const parts = path.split("/");
-        
-        const extIdx = parts.indexOf("extensions");
-        if (extIdx !== -1 && parts[extIdx + 1]) {
-            const name = parts[extIdx + 1];
-            const root = parts.slice(0, extIdx + 2).join("/");
-            return { root, name, source: 'local' as const };
-        }
-
-        const nmIdx = parts.indexOf("node_modules");
-        if (nmIdx !== -1 && parts[nmIdx + 1]) {
-            let name = parts[nmIdx + 1];
-            let rootParts = parts.slice(0, nmIdx + 2);
-            
-            if (name.startsWith("@") && parts[nmIdx + 2]) {
-                name = `${name}/${parts[nmIdx + 2]}`;
-                rootParts.push(parts[nmIdx + 2]);
-            }
-            
-            const root = rootParts.join("/");
-            return { root, name, source: 'online' as const };
-        }
-
-        return null;
-    }
-
-    private readPackageJson(root: string) {
-        try {
-            const pkgPath = join(root, "package.json");
-            const data = readFileSync(pkgPath, "utf-8");
-            const pkg = JSON.parse(data);
-            return {
-                version: pkg.version,
-                description: pkg.description,
-                author: typeof pkg.author === 'string' ? pkg.author : (pkg.author?.name),
-            };
-        } catch {
-            return {};
-        }
-    }
-}
-                
-                const version = ext.version ? ` \x1b[2m(v${ext.version})\x1b[0m` : '';
-                const caps = ` \x1b[2m(${ext.toolsCount} tools, ${ext.commandsCount} cmds)\x1b[0m`;
-
-                console.log(`  \x1b[32m●\x1b[0m ${sourceTag} \x1b[1m${ext.name}\x1b[0m${version}${caps}`);
-                
-                if (ext.description) {
-                    console.log(`    \x1b[2m${ext.description}\x1b[0m`);
-                }
-            }
-            console.log(""); // Extra newline
-        }
-    }
-
-    private collectExtensions(api: ExtensionAPI): Map<string, ExtensionMetadata> {
-        const extensions = new Map<string, ExtensionMetadata>();
-
-        const tools = api.getAllTools();
-        for (const tool of tools) {
-            if (tool.sourceInfo && tool.sourceInfo.source !== "builtin" && tool.sourceInfo.path) {
-                this.updateExtensionMap(extensions, tool.sourceInfo.path, "tool");
-            }
-        }
-
-        const commands = api.getCommands();
-        for (const cmd of commands) {
-            if (cmd.source === "extension" && cmd.sourceInfo && cmd.sourceInfo.path) {
-                this.updateExtensionMap(extensions, cmd.sourceInfo.path, "command");
-            }
-        }
-
-        return extensions;
-    }
-
-    private updateExtensionMap(map: Map<string, ExtensionMetadata>, path: string, type: "tool" | "command") {
-        const info = this.getExtensionInfo(path);
-        if (!info) return;
-
-        let meta = map.get(info.name);
-        if (!meta) {
-            const pkg = this.readPackageJson(info.root);
-            meta = {
-                name: info.name,
-                root: info.root,
-                source: info.source,
-                ...pkg,
-                toolsCount: 0,
-                commandsCount: 0,
-            };
-            map.set(info.name, meta);
-        }
-
-        if (type === "tool") meta.toolsCount++;
-        else meta.commandsCount++;
     }
 
     private getExtensionInfo(path: string) {
