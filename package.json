@@ -1,0 +1,43 @@
+{
+  "name": "pi-ext-better-dashboard",
+  "version": "0.1.0",
+  "description": "Hides startup logs and clears the terminal on startup for a cleaner pi-coding-agent experience",
+  "keywords": ["pi", "extension", "ai", "coding-agent", "typescript"],
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "test": "bun test",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --apply .",
+    "format": "biome format --write .",
+    "check": "biome check --apply .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "^0.32.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.12",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/pi-extension-starter.git"
+  },
+  "author": "Your Name",
+  "license": "MIT"
+}
