@@ -36,7 +36,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/pi-extension-starter.git"
+    "url": "https://github.com/naranyala/pi-ext-better-dashboard"
   },
   "author": "Your Name",
   "license": "MIT"

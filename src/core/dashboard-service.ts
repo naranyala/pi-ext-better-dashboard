@@ -1,18 +1,19 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { writeFileSync, readFileSync, statSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { writeFileSync, readFileSync, statSync, readdirSync, existsSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
 import os from "node:os";
 
 interface ExtensionMetadata {
     name: string;
     root: string;
-    source: 'online' | 'local';
     version?: string;
     description?: string;
     author?: string;
     toolsCount: number;
     commandsCount: number;
     sizeMB?: number;
+    installed: boolean;
+    loaded: boolean;
 }
 
 export class DashboardService {
@@ -22,68 +23,54 @@ export class DashboardService {
         this.ensureQuietStartup();
     }
 
-    /**
-     * Ensures that 'quietStartup' is set to true in the global settings.
-     * This hides the startup header by design.
-     */
     private ensureQuietStartup() {
         try {
             const data = readFileSync(this.settingsPath, "utf-8");
             const settings = JSON.parse(data);
-
             if (settings.quietStartup !== true) {
                 settings.quietStartup = true;
                 writeFileSync(this.settingsPath, JSON.stringify(settings, null, 2));
             }
-        } catch (e) {
-            // Settings file might not exist or be malformed, we can't do much here
-            // but we'll still try to clear the screen on session_start.
-        }
+        } catch (e) {}
     }
 
-    /**
-     * Clears the terminal screen.
-     * Called during session_start to remove any startup logs that might have leaked.
-     */
     public clearScreen(ctx?: ExtensionContext) {
-        // Use console.clear for a more aggressive wipe of the terminal scrollback
         console.clear();
-        // Fallback to ANSI just in case
         process.stdout.write('\x1b[2J\x1b[H');
     }
 
-    /**
-     * Prints a comprehensive welcome message with all available meta-information.
-     */
     public printWelcome(api: ExtensionAPI, ctx: ExtensionContext) {
-        const tools = api.getAllTools();
-        const commands = api.getCommands();
+        const extensions = this.collectAllExtensions(api);
         
-        // 1. Calculate Extension Count
-        const extensions = this.collectExtensions(api);
-
-        // 2. Gather Session Info
         const sessionName = api.getSessionName() || "Unnamed Session";
         const sessionFile = ctx.sessionManager.getSessionFile() || "Ephemeral";
         const entryCount = ctx.sessionManager.getEntries().length;
 
-        // 3. Gather System Info
         const platform = `${os.platform()} ${os.arch()}`;
         const nodeVer = process.version;
         const cwd = process.cwd();
         const user = os.userInfo().username;
         const uptime = this.formatUptime(os.uptime());
         
-        // CPU Load (POSIX only)
         const load = (typeof os.loadavg === 'function') ? os.loadavg()[0].toFixed(2) : 'N/A';
-        
-        // Memory Usage
         const totalMem = (os.totalmem() / (1024 ** 3)).toFixed(2);
         const freeMem = (os.freemem() / (1024 ** 3)).toFixed(2);
         const memUsage = ((1 - os.freemem() / os.totalmem()) * 100).toFixed(1);
-
-        // 4. Gather Intelligence Info
         const thinkingLevel = api.getThinkingLevel();
+
+        // Build extension list
+        let extensionList = "";
+        const sortedExts = Array.from(extensions.values()).sort((a, b) => a.name.localeCompare(b.name));
+        
+        for (const ext of sortedExts) {
+            const status = ext.loaded ? "\x1b[32m●\x1b[0m" : "\x1b[30m○\x1b[0m";
+            const version = ext.version ? ` \x1b[2m(v${ext.version})\x1b[0m` : '';
+            const size = ext.sizeMB ? ` \x1b[2m(${ext.sizeMB.toFixed(2)} MB)\x1b[0m` : '';
+            const caps = ` \x1b[2m(${ext.toolsCount} tools, ${ext.commandsCount} cmds)\x1b[0m`;
+            const author = ext.author ? ` \x1b[2mby ${ext.author}\x1b[0m` : '';
+
+            extensionList += `  ${status} \x1b[1m${ext.name}\x1b[0m${version}${size}${caps}${author}\n`;
+        }
 
         const welcome = `
 \x1b[1m\x1b[34mWelcome to \x1b[0mpi coding agent\x1b[0m
@@ -103,23 +90,18 @@ export class DashboardService {
   \x1b[32m●\x1b[0m CPU Load: ${load} | Mem: ${freeMem}/${totalMem} GB (${memUsage}%)
   \x1b[32m●\x1b[0m Path: \x1b[2m${cwd}\x1b[0m
 
-\x1b[1m\x1b[33m🛠️ CAPABILITIES\x1b[0m
-  \x1b[32m●\x1b[0m Total Tools: ${tools.length}
-  \x1b[32m●\x1b[0m Total Commands: ${commands.length}
-  \x1b[32m●\x1b[0m Extensions: ${extensions.size}
+\x1b[1m\x1b[33m🧩 EXTENSIONS\x1b[0m
+  \x1b[2m(● loaded, ○ installed)\x1b[0m
+${extensionList}
 `;
         console.log(welcome);
     }
 
-    /**
-     * Formats uptime in a human-readable way.
-     */
     private formatUptime(seconds: number): string {
         const d = Math.floor(seconds / (3600 * 24));
         const h = Math.floor((seconds % (3600 * 24)) / 3600);
         const m = Math.floor((seconds % 3600) / 60);
         const s = Math.floor(seconds % 60);
-
         let result = "";
         if (d > 0) result += `${d}d `;
         if (h > 0) result += `${h}h `;
@@ -128,54 +110,77 @@ export class DashboardService {
         return result.trim();
     }
 
-    /**
-     * Formats and prints the list of active extensions.
-     */
-    public printExtensionList(api: ExtensionAPI) {
-        const extensionsMap = this.collectExtensions(api);
-
-        if (extensionsMap.size > 0) {
-            const sortedExts = Array.from(extensionsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-            
-            console.log(`\x1b[1m\x1b[33mLoaded Extensions (\x1b[1m${sortedExts.length}\x1b[0m\x1b[33m):\x1b[0m`);
-            
-            for (const ext of sortedExts) {
-                const sourceTag = ext.source === 'local' 
-                    ? '\x1b[36m[Local]\x1b[0m' 
-                    : '\x1b[35m[Online]\x1b[0m';
-                
-                const version = ext.version ? ` \x1b[2m(v${ext.version})\x1b[0m` : '';
-                const size = ext.sizeMB ? ` \x1b[2m(${ext.sizeMB.toFixed(2)} MB)\x1b[0m` : '';
-                const caps = ` \x1b[2m(${ext.toolsCount} tools, ${ext.commandsCount} cmds)\x1b[0m`;
-                const author = ext.author ? ` \x1b[2mby ${ext.author}\x1b[0m` : '';
-
-                console.log(`  \x1b[32m●\x1b[0m ${sourceTag} \x1b[1m${ext.name}\x1b[0m${version}${size}${caps}${author}`);
-            }
-            console.log(""); // Extra newline
-        }
-    }
-
-    private collectExtensions(api: ExtensionAPI): Map<string, ExtensionMetadata> {
+    private collectAllExtensions(api: ExtensionAPI): Map<string, ExtensionMetadata> {
         const extensions = new Map<string, ExtensionMetadata>();
 
+        // 1. Scan installation directories for all installed extensions
+        const installRoots = [
+            join(os.homedir(), ".pi", "agent", "extensions"),
+            join(os.homedir(), ".pi", "agent", "node_modules"),
+            join(os.homedir(), ".pi", "agent", "git"),
+            process.env.npm_config_prefix || join(os.homedir(), ".npm-packages", "lib", "node_modules")
+        ];
+
+        for (const root of installRoots) {
+            if (existsSync(root)) {
+                this.recursiveScan(root, extensions);
+            }
+        }
+
+        // 2. Mark loaded ones and get accurate counts via API
         const tools = api.getAllTools();
         for (const tool of tools) {
-            if (tool.sourceInfo && tool.sourceInfo.source !== "builtin" && tool.sourceInfo.path) {
-                this.updateExtensionMap(extensions, tool.sourceInfo.path, "tool");
+            if (tool.sourceInfo && (tool.sourceInfo.source as string) !== "builtin" && tool.sourceInfo.path) {
+                this.updateExtensionMap(extensions, tool.sourceInfo.path, "tool", true);
             }
         }
 
         const commands = api.getCommands();
         for (const cmd of commands) {
-            if (cmd.source === "extension" && cmd.sourceInfo && cmd.sourceInfo.path) {
-                this.updateExtensionMap(extensions, cmd.sourceInfo.path, "command");
+            if ((cmd.source as string) !== "builtin" && cmd.sourceInfo && cmd.sourceInfo.path) {
+                this.updateExtensionMap(extensions, cmd.sourceInfo.path, "command", true);
             }
         }
 
         return extensions;
     }
 
-    private updateExtensionMap(map: Map<string, ExtensionMetadata>, path: string, type: "tool" | "command") {
+    private recursiveScan(dir: string, extensions: Map<string, ExtensionMetadata>) {
+        try {
+            const files = readdirSync(dir);
+            for (const file of files) {
+                const fullPath = join(dir, file);
+                const stats = statSync(fullPath);
+                if (stats.isDirectory()) {
+                    // Check if this directory contains a package.json
+                    const pkgPath = join(fullPath, "package.json");
+                    if (existsSync(pkgPath)) {
+                        const info = this.getExtensionInfo(fullPath);
+                        if (info) {
+                            const pkg = this.readPackageJson(info.root);
+                            const sizeMB = this.getDirSize(info.root) / (1024 * 1024);
+                            extensions.set(info.name, {
+                                name: info.name,
+                                root: info.root,
+                                version: pkg.version,
+                                description: pkg.description,
+                                author: pkg.author,
+                                sizeMB,
+                                toolsCount: 0,
+                                commandsCount: 0,
+                                installed: true,
+                                loaded: false
+                            });
+                        }
+                    }
+                    // Recurse into subdirectories (e.g. for the git/github.com/user/repo structure)
+                    this.recursiveScan(fullPath, extensions);
+                }
+            }
+        } catch (e) {}
+    }
+
+    private updateExtensionMap(map: Map<string, ExtensionMetadata>, path: string, type: "tool" | "command", isLoaded: boolean) {
         const info = this.getExtensionInfo(path);
         if (!info) return;
 
@@ -186,15 +191,19 @@ export class DashboardService {
             meta = {
                 name: info.name,
                 root: info.root,
-                source: info.source,
-                ...pkg,
+                version: pkg.version,
+                description: pkg.description,
+                author: pkg.author,
                 sizeMB,
                 toolsCount: 0,
                 commandsCount: 0,
+                installed: true,
+                loaded: isLoaded
             };
             map.set(info.name, meta);
         }
 
+        meta.loaded = meta.loaded || isLoaded;
         if (type === "tool") meta.toolsCount++;
         else meta.commandsCount++;
     }
@@ -206,40 +215,63 @@ export class DashboardService {
             for (const file of files) {
                 const filePath = join(dirPath, file);
                 const stats = statSync(filePath);
-                if (stats.isDirectory()) {
-                    totalSize += this.getDirSize(filePath);
-                } else {
-                    totalSize += stats.size;
-                }
+                if (stats.isDirectory()) totalSize += this.getDirSize(filePath);
+                else totalSize += stats.size;
             }
-        } catch (e) {
-            // Handle errors (e.g. permission denied)
-        }
+        } catch (e) {}
         return totalSize;
     }
 
     private getExtensionInfo(path: string) {
+        let currentDir = path;
         const parts = path.split("/");
-        
-        const extIdx = parts.indexOf("extensions");
-        if (extIdx !== -1 && parts[extIdx + 1]) {
-            const name = parts[extIdx + 1];
-            const root = parts.slice(0, extIdx + 2).join("/");
-            return { root, name, source: 'local' as const };
+        const fileName = parts[parts.length - 1];
+        const isFile = fileName.includes('.');
+
+        if (isFile) currentDir = dirname(path);
+
+        // First, try to find package.json
+        let searchDir = currentDir;
+        while (true) {
+            const pkgPath = join(searchDir, "package.json");
+            if (existsSync(pkgPath)) {
+                try {
+                    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+                    return { root: searchDir, name: pkg.name || searchDir.split('/').pop() || '' };
+                } catch {
+                    return { root: searchDir, name: searchDir.split('/').pop() || '' };
+                }
+            }
+            if (searchDir === "/" || searchDir === ".") break;
+            const parentDir = dirname(searchDir);
+            if (parentDir === searchDir) break;
+            searchDir = parentDir;
         }
 
-        const nmIdx = parts.indexOf("node_modules");
-        if (nmIdx !== -1 && parts[nmIdx + 1]) {
-            let name = parts[nmIdx + 1];
-            let rootParts = parts.slice(0, nmIdx + 2);
-            
-            if (name.startsWith("@") && parts[nmIdx + 2]) {
-                name = `${name}/${parts[nmIdx + 2]}`;
-                rootParts.push(parts[nmIdx + 2]);
+        // Fallback: use path heuristics ONLY for known extension directories
+        const pathParts = currentDir.split("/");
+        const piAgentIndex = pathParts.indexOf("agent");
+        if (piAgentIndex !== -1) {
+            const afterAgent = pathParts.slice(piAgentIndex + 1);
+            const extIndex = afterAgent.indexOf("extensions");
+            if (extIndex !== -1 && afterAgent[extIndex + 1]) {
+                return { root: join(...pathParts.slice(0, piAgentIndex + 1 + extIndex + 2)), name: afterAgent[extIndex + 1] };
             }
-            
-            const root = rootParts.join("/");
-            return { root, name, source: 'online' as const };
+
+            const nodeModIndex = afterAgent.indexOf("node_modules");
+            if (nodeModIndex !== -1 && afterAgent[nodeModIndex + 1]) {
+                return { root: join(...pathParts.slice(0, piAgentIndex + 1 + nodeModIndex + 2)), name: afterAgent[nodeModIndex + 1] };
+            }
+
+            const gitIndex = afterAgent.indexOf("git");
+            if (gitIndex !== -1 && afterAgent[gitIndex + 1]) {
+                return { root: join(...pathParts.slice(0, piAgentIndex + 1 + gitIndex + 2)), name: afterAgent[gitIndex + 1] };
+            }
+        }
+
+        // For standalone files directly in extensions folder (no subdirectory)
+        if (isFile && pathParts[pathParts.length - 1] === "extensions" && pathParts[pathParts.length - 2] === "agent") {
+            return { root: currentDir, name: fileName.replace(/\.[^.]+$/, '') };
         }
 
         return null;
@@ -251,6 +283,7 @@ export class DashboardService {
             const data = readFileSync(pkgPath, "utf-8");
             const pkg = JSON.parse(data);
             return {
+                name: pkg.name,
                 version: pkg.version,
                 description: pkg.description,
                 author: typeof pkg.author === 'string' ? pkg.author : (pkg.author?.name),

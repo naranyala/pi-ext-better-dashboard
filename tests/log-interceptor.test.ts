@@ -10,6 +10,7 @@ describe("LogInterceptor", () => {
 
     beforeEach(() => {
         logs = [];
+        LogInterceptor.setSilence(false);
         (LogInterceptor as any).originalConsole.log = (...args: any[]) => {
             logs.push(args.join(" "));
         };

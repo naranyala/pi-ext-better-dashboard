@@ -31,6 +31,20 @@ export class LogInterceptor {
             };
         });
 
+        // Patch process.stdout.write to catch low-level host logs
+        const originalWrite = process.stdout.write;
+        process.stdout.write = function(...args: unknown[]) {
+            const chunk = args[0];
+            const message = chunk?.toString() || "";
+            if (LogInterceptor.silenceMode && (
+                message.includes("Loaded Extensions") || 
+                message.includes("[Online]")
+            )) {
+                return;
+            }
+            return originalWrite.apply(process.stdout, args);
+        };
+
         (console as any).__pi_patched = true;
     }
 

@@ -27,9 +27,6 @@ export default function (api: ExtensionAPI) {
 
       // 3. Print the comprehensive welcome message
       services.silence.printWelcome(api, ctx);
-
-      // 4. Print extensions in a clean list format
-      services.silence.printExtensionList(api);
     } catch (e: any) {
       services.logger.error(`Startup silence failed: ${e.message}`, ctx);
     }

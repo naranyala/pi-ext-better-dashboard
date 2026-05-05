@@ -1,7 +1,7 @@
 # 🚀 Pi Better Dashboard
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platform: pi-mono](https://img.shields.io/badge/Platform-pi--mono-blue.svg)]()
+[![Platform: pi-mono](https://img.shields.io/badge/Platform-pi--mono-blue.svg)](https://github.com/mariozechner/pi-mono)](#)
 
 **Clean the slate. Know your agent.**
 
@@ -55,18 +55,9 @@ Loaded Extensions:
 
 ## 🚀 Installation
 
-### 📂 Option 1: Global Installation (Recommended)
-To apply this to all your projects, place the extension in your global extensions folder:
-1. Clone or download this repository.
-2. Move the folder/file to: `~/.pi/agent/extensions/pi-ext-better-dashboard`
-
-### 📁 Option 2: Project-Local Installation
-To use this only for a specific project:
-1. Create a `.pi/extensions/` directory in your project root.
-2. Move the extension into that folder.
-
-### 🔄 Reloading
-If `pi` is already running, simply type `/reload` to apply the changes.
+```bash
+pi install git:github.com/naranyala/pi-ext-better-dashboard
+```
 
 ---
 
