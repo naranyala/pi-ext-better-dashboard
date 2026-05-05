@@ -40,6 +40,10 @@ export class DashboardService {
         const load = (typeof os.loadavg === 'function') ? os.loadavg()[0].toFixed(2) : 'N/A';
         const thinkingLevel = api.getThinkingLevel();
 
+        const tools = api.getAllTools();
+        const commands = api.getCommands();
+        const extensions = this.getLoadedExtensions(api);
+
         const welcome = `
 \x1b[1m\x1b[34mWelcome to \x1b[0mpi coding agent\x1b[0m
 \x1b[2mThe ultimate AI coding companion\x1b[0m
@@ -57,8 +61,64 @@ export class DashboardService {
   \x1b[32m●\x1b[0m User: ${user} | Uptime: ${uptime}
   \x1b[32m●\x1b[0m CPU Load: ${load}
   \x1b[32m●\x1b[0m Path: \x1b[2m${cwd}\x1b[0m
+
+\x1b[1m\x1b[33m🛠️ CAPABILITIES\x1b[0m
+  \x1b[32m●\x1b[0m Total Tools: ${tools.length}
+  \x1b[32m●\x1b[0m Total Commands: ${commands.length}
+  \x1b[32m●\x1b[0m Extensions: ${extensions.length}
+
+${extensions.length > 0 ? `Loaded Extensions:\n${extensions.map(ext => `  \x1b[32m●\x1b[0m ${ext}`).join('\n')}\n` : ''}
 `;
         console.log(welcome);
+    }
+
+    private getLoadedExtensions(api: ExtensionAPI): string[] {
+        const extensionNames = new Set<string>();
+
+        // 1. Get all tools
+        const tools = api.getAllTools();
+        for (const tool of tools) {
+            const name = this.extractExtensionNameFromPath(tool.sourceInfo.path);
+            if (name && name !== "@mariozechner/pi-coding-agent") extensionNames.add(name);
+        }
+
+        // 2. Get all commands
+        const commands = api.getCommands();
+        for (const command of commands) {
+            const name = this.extractExtensionNameFromPath(command.sourceInfo.path);
+            if (name && name !== "@mariozechner/pi-coding-agent") extensionNames.add(name);
+        }
+
+        // Sort alphabetically
+        return Array.from(extensionNames).sort((a, b) => a.localeCompare(b));
+    }
+
+    private extractExtensionNameFromPath(path: string): string | undefined {
+        // Heuristic 1: node_modules
+        if (path.includes('node_modules/')) {
+            const parts = path.split('node_modules/');
+            if (parts.length > 1) {
+                const remaining = parts[1];
+                const firstPart = remaining.split('/')[0];
+                if (firstPart.startsWith('@')) {
+                    const secondPart = remaining.split('/')[1];
+                    if (secondPart) {
+                        return `${firstPart}/${secondPart}`;
+                    }
+                }
+                return firstPart;
+            }
+        }
+
+        // Heuristic 2: .pi/extensions/
+        if (path.includes('.pi/extensions/')) {
+            const parts = path.split('.pi/extensions/');
+            if (parts.length > 1) {
+                return parts[1].split('/')[0];
+            }
+        }
+
+        return undefined;
     }
 
     private formatUptime(seconds: number): string {
