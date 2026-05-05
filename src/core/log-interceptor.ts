@@ -35,12 +35,41 @@ export class LogInterceptor {
         const originalWrite = process.stdout.write;
         process.stdout.write = function(...args: unknown[]) {
             const chunk = args[0];
-            const message = chunk?.toString() || "";
+            let message = chunk?.toString() || "";
             if (LogInterceptor.silenceMode && (
                 message.includes("Loaded Extensions") || 
                 message.includes("[Online]")
             )) {
                 return;
+            }
+
+            if (message.includes("Loaded Extensions")) {
+                const parts = message.split(/Loaded Extensions:?\s*/i);
+                if (parts.length > 1) {
+                    let listContent = parts[1];
+                    
+                    // 1. Remove legend like "(● loaded, ○ installed)"
+                    listContent = listContent.replace(/\([^)]*[\u25cf\u25cb\u25a0\u25a1][^)]*\)/, '');
+
+                    // 2. Split by common delimiters including all status symbols
+                    const rawNames = listContent.split(/[\n,•●○\-\*\(\)\[\]\u25cf\u25cb]/);
+                    const cleanedNames = rawNames
+                        .map(n => n.trim())
+                        .filter(n => n.length > 0)
+                        .map(n => n.split(/[./]/)[0])
+                        .filter(n => n.length > 0 && 
+                                     !['loaded', 'installed', '(', ')', '○', '●', 'ext', 'extensions'].includes(n.toLowerCase()) &&
+                                     !/^\d+(\.\d+)?\s*(B|KB|MB|GB|TB)$/i.test(n));
+                    
+                    const uniqueNames = Array.from(new Set(cleanedNames));
+                    if (uniqueNames.length > 0) {
+                        message = `Loaded Extensions: ${uniqueNames.join(', ')}`;
+                    }
+                }
+            }
+
+            if (message !== chunk?.toString()) {
+                return originalWrite.apply(process.stdout, [message, ...args.slice(1)]);
             }
             return originalWrite.apply(process.stdout, args);
         };
